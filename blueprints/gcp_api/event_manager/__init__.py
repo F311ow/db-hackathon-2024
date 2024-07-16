@@ -1,6 +1,5 @@
-from flask import request, jsonify, make_response
+from flask import request, make_response
 from flask_restx import Namespace, Resource, fields
-from http import HTTPStatus
 from cloudsql_connector import connect_with_connector
 import sqlalchemy
 import logging
@@ -63,7 +62,6 @@ class Events(Resource):
         res = get_events(db)
         return {'events': res, 'total_events': len(res)}
 
-    @event_mgr_ns.marshal_list_with(event_model, code=HTTPStatus.CREATED)
     @event_mgr_ns.expect(event_model)
     def post(self):
         return save_event(db,
@@ -77,17 +75,19 @@ class Events(Resource):
 class Event(Resource):
     @event_mgr_ns.marshal_list_with(event_model)
     def get(self, event_id):
-
         return get_event(db, event_id)
 
-    @event_mgr_ns.marshal_list_with(event_model)
     @event_mgr_ns.expect(event_model)
     def put(self, event_id):
-        return request.json
+        return merge_event(db, event_id,
+                           event_type=request.json['event_type'],
+                           event_dt=request.json['event_dt'],
+                           event_name=request.json['event_name'],
+                           user_id=request.json['user_id'])
 
     @event_mgr_ns.response(404, 'Entity not found')
     def delete(self, event_id):
-        return '', 204
+        return delete_event(db, event_id)
 
 
 def save_event(app_db: sqlalchemy.engine.base.Engine, event_type: str, event_dt: str, user_id: int, event_name: str):
@@ -99,10 +99,10 @@ def save_event(app_db: sqlalchemy.engine.base.Engine, event_type: str, event_dt:
         # Using a with statement ensures that the connection is always released
         # back into the pool at the end of statement (even if an error occurs)
         with app_db.connect() as conn:
-            conn.execute(stmt, parameters={"event_dt": event_dt,
-                                           "event_type": event_type,
-                                           "event_name": event_name,
-                                           "user_id": user_id})
+            conn.execute(stmt, parameters={'event_dt': event_dt,
+                                           'event_type': event_type,
+                                           'event_name': event_name,
+                                           'user_id': user_id})
             conn.commit()
     except Exception as e:
         # If something goes wrong, handle the error in this section. This might
@@ -115,7 +115,7 @@ def save_event(app_db: sqlalchemy.engine.base.Engine, event_type: str, event_dt:
         # [END_EXCLUDE]
     # [END cloud_sql_postgres_sqlalchemy_connection]
 
-    return make_response(f'Event created. User ID: {user_id} date: {event_dt}, '
+    return make_response(f'Event created successfully. User ID: {user_id} date: {event_dt}, '
                          f'type: {event_type}, name: {event_name}', 200)
 
 
@@ -141,3 +141,30 @@ def get_event(app_db, event_id):
     return event_rec._asdict() if event_rec else {}
 
 
+def merge_event(app_db, event_id, event_type, event_dt, user_id, event_name):
+    cnt_stmt = sqlalchemy.text('SELECT count(*) FROM t_events WHERE event_id = :event_id;')
+    updt_stmt = sqlalchemy.text('UPDATE t_events SET event_dt = :event_dt, event_type = :event_type, event_name = '
+                                ':event_name, user_id = :user_id '
+                                'WHERE event_id = :event_id;')
+    with app_db.connect() as conn:
+        rec_cnt = conn.execute(cnt_stmt, parameters={'event_id': event_id}).scalar()
+        if rec_cnt == 0:
+            return save_event(app_db, event_type, event_dt, user_id, event_name)
+        else:
+            conn.execute(updt_stmt, parameters={'event_id': event_id,
+                                                'event_dt': event_dt,
+                                                'event_type': event_type,
+                                                'event_name': event_name,
+                                                'user_id': user_id})
+            conn.commit()
+            return make_response(f'Event {event_id} updated successfully. User ID: {user_id} date: {event_dt}, '
+                                 f'type: {event_type}, name: {event_name}', 200)
+
+
+def delete_event(app_db, event_id):
+    del_stmt = sqlalchemy.text('DELETE FROM t_events WHERE event_id = :event_id;')
+    with app_db.connect() as conn:
+        conn.execute(del_stmt, parameters={'event_id': event_id})
+        conn.commit()
+
+    return make_response('Success', 204)

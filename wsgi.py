@@ -1,8 +1,10 @@
 import os
 from flask import Flask
+from flask_cors import CORS
 from blueprints.gcp_api import gcp_api_bp
 
 app = Flask(__name__)
+CORS(app)
 
 app.config['RESTPLUS_MASK_SWAGGER'] = False
 
