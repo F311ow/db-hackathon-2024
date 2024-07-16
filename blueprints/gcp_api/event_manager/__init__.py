@@ -55,14 +55,6 @@ event_list_model = event_mgr_ns.model('event_list_model',
                                                                as_list=True),
                                        'total_events': fields.Integer(description='Total number of events')})
 
-event = {
-    "event_type": "Medicine",
-    "event_dt": "2024-07-12T08:00:00.000Z",
-    "user_id": 123,
-    "name": "Take Donepezil",
-    "event_id": "1000025"
-}
-
 
 @event_mgr_ns.route('')
 class Events(Resource):
@@ -85,7 +77,8 @@ class Events(Resource):
 class Event(Resource):
     @event_mgr_ns.marshal_list_with(event_model)
     def get(self, event_id):
-        return request.json
+
+        return get_event(db, event_id)
 
     @event_mgr_ns.marshal_list_with(event_model)
     @event_mgr_ns.expect(event_model)
@@ -133,8 +126,18 @@ def get_events(app_db):
         res_list = []
         events_lst = conn.execute(stmt).fetchall()
         for row in events_lst:
-            print(row)
-            res_list.append(row._asdict())
-            print(res_list)
+            if row:
+                res_list.append(row._asdict())
 
     return res_list
+
+
+def get_event(app_db, event_id):
+    stmt = sqlalchemy.text('SELECT event_id, event_dt, event_type, event_name, user_id '
+                           'FROM t_events WHERE event_id = :event_id;')
+    with app_db.connect() as conn:
+        event_rec = conn.execute(stmt, parameters={'event_id': event_id}).first()
+
+    return event_rec._asdict() if event_rec else {}
+
+
